@@ -12,12 +12,23 @@ let sqlJsInstance;
 let initPromise;
 const generateUid = customAlphabet(UID_ALPHABET, UID_LENGTH);
 const dbPath = path.join(__dirname, '..', DB_FILENAME);
+let sqlJsBaseDir;
+
+class NotFoundError extends Error {}
+
+function resolveSqlJsBaseDir() {
+  if (!sqlJsBaseDir) {
+    const packageJsonPath = require.resolve('sql.js/package.json');
+    sqlJsBaseDir = path.dirname(packageJsonPath);
+  }
+  return sqlJsBaseDir;
+}
 
 async function ensureInitialized() {
   if (!initPromise) {
     initPromise = (async () => {
       sqlJsInstance = await initSqlJs({
-        locateFile: file => path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', file)
+        locateFile: file => path.join(resolveSqlJsBaseDir(), 'dist', file)
       });
 
       let fileBuffer;
@@ -61,7 +72,7 @@ async function persist() {
 
 async function createTicket({ customerName, subject, note, startAt, endAt }) {
   await ensureInitialized();
-  const uid = generateUid();
+  const uid = await generateUniqueUid();
   const timestamp = new Date().toISOString();
   const stmt = dbInstance.prepare(`
     INSERT INTO tickets (uid, customer_name, subject, note, start_at, end_at, status, created_at, updated_at)
@@ -82,6 +93,26 @@ async function createTicket({ customerName, subject, note, startAt, endAt }) {
 
   await persist();
   return { uid };
+}
+
+async function generateUniqueUid() {
+  await ensureInitialized();
+  for (let attempts = 0; attempts < 5; attempts += 1) {
+    const candidate = generateUid();
+    const existing = findTicketByUidSync(candidate);
+    if (!existing) {
+      return candidate;
+    }
+  }
+  throw new Error('Konnte keine eindeutige Ticket-ID generieren.');
+}
+
+function findTicketByUidSync(uid) {
+  const stmt = dbInstance.prepare('SELECT 1 FROM tickets WHERE uid = :uid');
+  stmt.bind({ ':uid': uid });
+  const exists = stmt.step();
+  stmt.free();
+  return exists;
 }
 
 async function findTicketByUid(uid) {
@@ -113,6 +144,10 @@ async function updateTicketStatus(uid, status) {
     ':uid': uid
   });
   stmt.free();
+  const changes = dbInstance.getRowsModified();
+  if (!changes) {
+    throw new NotFoundError(`Ticket mit der UID ${uid} wurde nicht gefunden.`);
+  }
   await persist();
 }
 
@@ -121,5 +156,6 @@ module.exports = {
   createTicket,
   findTicketByUid,
   listTickets,
-  updateTicketStatus
+  updateTicketStatus,
+  NotFoundError
 };

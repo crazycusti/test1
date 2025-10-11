@@ -1,6 +1,13 @@
 const express = require('express');
 const session = require('express-session');
-const { ensureInitialized, createTicket, findTicketByUid, listTickets, updateTicketStatus } = require('./src/db');
+const {
+  ensureInitialized,
+  createTicket,
+  findTicketByUid,
+  listTickets,
+  updateTicketStatus,
+  NotFoundError
+} = require('./src/db');
 
 const escapeHtml = (value) => String(value)
   .replace(/&/g, '&amp;')
@@ -164,7 +171,7 @@ app.post('/status', async (req, res, next) => {
         <li><strong>Start:</strong> ${escapeHtml(ticket.start_at)}</li>
         <li><strong>Ende:</strong> ${escapeHtml(ticket.end_at)}</li>
         <li><strong>Status:</strong> ${escapeHtml(ticket.status)}</li>
-      <li><strong>Zuletzt aktualisiert:</strong> ${escapeHtml(ticket.updated_at)}</li>
+        <li><strong>Zuletzt aktualisiert:</strong> ${escapeHtml(ticket.updated_at)}</li>
     </ul>
     <p><a href="/status">Weitere Ticket-ID prüfen</a></p>
   </body>
@@ -292,8 +299,16 @@ app.post('/admin/tickets/:uid/status', requireAuth, async (req, res, next) => {
     await updateTicketStatus(uid, status);
     res.redirect('/admin/dashboard');
   } catch (error) {
+    if (error instanceof NotFoundError) {
+      return res.status(404).send('Ticket wurde nicht gefunden.');
+    }
     next(error);
   }
+});
+
+app.use((err, req, res, next) => {
+  console.error('Fehler beim Verarbeiten der Anfrage:', err);
+  res.status(500).send('Interner Serverfehler. Bitte später erneut versuchen.');
 });
 
 app.listen(PORT, () => {
