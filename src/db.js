@@ -3,7 +3,7 @@ const path = require('path');
 const initSqlJs = require('sql.js');
 const { customAlphabet } = require('nanoid');
 
-const DB_FILENAME = 'tickets.db';
+const DB_FILENAME = process.env.DATABASE_FILE || 'tickets.db';
 const UID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const UID_LENGTH = 8;
 
@@ -11,8 +11,11 @@ let dbInstance;
 let sqlJsInstance;
 let initPromise;
 const generateUid = customAlphabet(UID_ALPHABET, UID_LENGTH);
-const dbPath = path.join(__dirname, '..', DB_FILENAME);
+const dbPath = path.isAbsolute(DB_FILENAME)
+  ? DB_FILENAME
+  : path.join(__dirname, '..', DB_FILENAME);
 let sqlJsBaseDir;
+let persistQueue = Promise.resolve();
 
 class NotFoundError extends Error {}
 
@@ -66,8 +69,12 @@ async function ensureInitialized() {
 }
 
 async function persist() {
-  const data = dbInstance.export();
-  await fs.writeFile(dbPath, Buffer.from(data));
+  persistQueue = persistQueue.then(async () => {
+    const data = dbInstance.export();
+    await fs.mkdir(path.dirname(dbPath), { recursive: true });
+    await fs.writeFile(dbPath, Buffer.from(data));
+  });
+  return persistQueue;
 }
 
 async function createTicket({ customerName, subject, note, startAt, endAt }) {
